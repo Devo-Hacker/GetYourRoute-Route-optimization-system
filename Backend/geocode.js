@@ -22,5 +22,3 @@ export async function geocodeAddress(address) {
   return { lat: parseFloat(lat), lon: parseFloat(lon) };
 }
 
-// Temporary test — remove after confirming it works
-geocodeAddress("Ahmedabad, India").then(console.log).catch(console.error);
