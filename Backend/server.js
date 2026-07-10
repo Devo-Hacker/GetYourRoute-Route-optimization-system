@@ -40,7 +40,9 @@ async function initGraph(retries = 3) {
     }
   }
 }
-// Find the closest actual road node to a raw geocoded point
+
+// Find the closest actual road node to a raw geocoded point,
+// but reject it if the closest node is too far away (outside our loaded area)
 function findNearestNode(location) {
   let closestNode = null;
   let closestDist = Infinity;
@@ -49,12 +51,25 @@ function findNearestNode(location) {
     const n = nodes[id];
     const dLat = n.lat - location.lat;
     const dLon = n.lon - location.lon;
-    const dist = dLat * dLat + dLon * dLon; // simple squared distance, fine for comparison
+    const dist = dLat * dLat + dLon * dLon; // squared distance, fine for comparison
 
     if (dist < closestDist) {
       closestDist = dist;
       closestNode = id;
     }
+  }
+
+  if (closestNode === null) {
+    throw new Error("Road graph is empty — server may still be loading data.");
+  }
+
+  // Convert squared-degree distance roughly to km for a sanity check
+  const approxKm = Math.sqrt(closestDist) * 111;
+
+  if (approxKm > 2) {
+    throw new Error(
+      `Location is outside the supported area (currently Ahmedabad only). Closest known point is ~${approxKm.toFixed(1)}km away.`
+    );
   }
 
   return closestNode;
@@ -98,7 +113,6 @@ app.post("/route", async (req, res) => {
   }
 });
 
-// Then, just CALL it inside app.listen — don't redefine it here
 app.listen(PORT, async () => {
   console.log(`Server running on http://localhost:${PORT}`);
   await initGraph();
