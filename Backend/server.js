@@ -14,36 +14,31 @@ const PORT = process.env.PORT || 5000;
 app.use(cors());
 app.use(express.json());
 
-// Build the road graph ONCE when the server starts, not on every request
-let roadGraph = {};
-let nodes = {};
+const MAX_ROUTE_DISTANCE_KM = 500; // sensible city-to-city cap
 
-const bbox = [23.02, 72.55, 23.04, 72.58]; // temporary fixed area — Ahmedabad test zone
+function haversineKm(a, b) {
+  const R = 6371;
+  const dLat = ((b.lat - a.lat) * Math.PI) / 180;
+  const dLon = ((b.lon - a.lon) * Math.PI) / 180;
+  const lat1 = (a.lat * Math.PI) / 180;
+  const lat2 = (b.lat * Math.PI) / 180;
 
-async function initGraph(retries = 3) {
-  for (let attempt = 1; attempt <= retries; attempt++) {
-    try {
-      console.log(`Building road graph (attempt ${attempt})...`);
-      const osmData = await fetchRoadNetwork(bbox);
-      const built = buildGraph(osmData);
-      roadGraph = built.graph;
-      nodes = built.nodes;
-      console.log("Graph ready. Total nodes:", Object.keys(roadGraph).length);
-      return;
-    } catch (error) {
-      console.error(`Graph build failed (attempt ${attempt}):`, error.message);
-      if (attempt === retries) {
-        console.error("All attempts failed. Server will run without a road graph — /route will not work until this is fixed.");
-      } else {
-        await new Promise(r => setTimeout(r, 5000));
-      }
-    }
-  }
+  const x =
+    Math.sin(dLat / 2) ** 2 +
+    Math.cos(lat1) * Math.cos(lat2) * Math.sin(dLon / 2) ** 2;
+  return R * 2 * Math.atan2(Math.sqrt(x), Math.sqrt(1 - x));
 }
 
-// Find the closest actual road node to a raw geocoded point,
-// but reject it if the closest node is too far away (outside our loaded area)
-function findNearestNode(location) {
+function getDynamicBbox(startLoc, endLoc, paddingKm = 4) {
+  const paddingDeg = paddingKm / 111;
+  const south = Math.min(startLoc.lat, endLoc.lat) - paddingDeg;
+  const north = Math.max(startLoc.lat, endLoc.lat) + paddingDeg;
+  const west = Math.min(startLoc.lon, endLoc.lon) - paddingDeg;
+  const east = Math.max(startLoc.lon, endLoc.lon) + paddingDeg;
+  return [south, west, north, east];
+}
+
+function findNearestNode(nodes, location) {
   let closestNode = null;
   let closestDist = Infinity;
 
@@ -51,49 +46,50 @@ function findNearestNode(location) {
     const n = nodes[id];
     const dLat = n.lat - location.lat;
     const dLon = n.lon - location.lon;
-    const dist = dLat * dLat + dLon * dLon; // squared distance, fine for comparison
-
+    const dist = dLat * dLat + dLon * dLon;
     if (dist < closestDist) {
       closestDist = dist;
       closestNode = id;
     }
   }
 
-  if (closestNode === null) {
-    throw new Error("Road graph is empty — server may still be loading data.");
-  }
-
-  // Convert squared-degree distance roughly to km for a sanity check
-  const approxKm = Math.sqrt(closestDist) * 111;
-
-  if (approxKm > 2) {
-    throw new Error(
-      `Location is outside the supported area (currently Ahmedabad only). Closest known point is ~${approxKm.toFixed(1)}km away.`
-    );
-  }
-
+  if (closestNode === null) throw new Error("No road data found near this location.");
   return closestNode;
 }
 
-// Estimate fuel used, based on distance and vehicle mileage
 function estimateFuel(distanceKm, mileageKmPerLitre = 15) {
   if (!distanceKm || distanceKm === Infinity) return null;
   return Number((distanceKm / mileageKmPerLitre).toFixed(2));
 }
 
-app.get("/", (req, res) => {
-  res.send("Backend Running on Development");
+app.get("/", (req, res) => res.send("Backend Running on Development"));
+
+app.get("/status", (req, res) => {
+  res.json({ ready: true, mode: "dynamic-global", maxDistanceKm: MAX_ROUTE_DISTANCE_KM });
 });
 
 app.post("/route", async (req, res) => {
   try {
-    const { start, end, algorithm, mileage } = req.body;
+    const { start, end, algorithm, mileage, avgSpeedKmph } = req.body;
 
     const startLocation = await geocodeAddress(start);
     const endLocation = await geocodeAddress(end);
 
-    const startNode = findNearestNode(startLocation);
-    const endNode = findNearestNode(endLocation);
+    const straightLineKm = haversineKm(startLocation, endLocation);
+    if (straightLineKm > MAX_ROUTE_DISTANCE_KM) {
+      return res.status(400).json({
+        error: `These points are ~${straightLineKm.toFixed(
+          1
+        )}km apart, which exceeds this demo's supported range (${MAX_ROUTE_DISTANCE_KM}km). Try two closer locations.`,
+      });
+    }
+
+    const bbox = getDynamicBbox(startLocation, endLocation);
+    const osmData = await fetchRoadNetwork(bbox);
+    const { graph: roadGraph, nodes } = buildGraph(osmData);
+
+    const startNode = findNearestNode(nodes, startLocation);
+    const endNode = findNearestNode(nodes, endLocation);
 
     let result;
     if (algorithm === "astar") {
@@ -101,19 +97,32 @@ app.post("/route", async (req, res) => {
     } else {
       result = dijkstra(roadGraph, startNode, endNode);
     }
-
+    if (!isFinite(result.distance)) {
+      return res.status(404).json({
+        error: "No connected road path found between these two points. This can happen in areas with sparse map data — try locations within a well-mapped city, or increase the distance between search points slightly.",
+      });
+    }
     const fuelEstimateLitres = estimateFuel(result.distance, mileage);
+    const durationMinutes =
+      avgSpeedKmph && result.distance ? (result.distance / avgSpeedKmph) * 60 : null;
+
+    const pathCoordinates = (result.path || [])
+      .map((id) => (nodes[id] ? { lat: nodes[id].lat, lon: nodes[id].lon } : null))
+      .filter(Boolean);
 
     res.json({
       ...result,
       fuelEstimateLitres,
+      durationMinutes,
+      pathCoordinates,
+      snapped: { start: nodes[startNode] || null, end: nodes[endNode] || null },
+      geocoded: { start: startLocation, end: endLocation },
     });
   } catch (error) {
     res.status(500).json({ error: error.message });
   }
 });
 
-app.listen(PORT, async () => {
+app.listen(PORT, () => {
   console.log(`Server running on http://localhost:${PORT}`);
-  await initGraph();
 });
