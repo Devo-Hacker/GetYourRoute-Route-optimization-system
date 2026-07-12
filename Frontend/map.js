@@ -159,6 +159,7 @@ routeForm.addEventListener("submit", async (e) => {
 
 function renderRoute(data) {
   resultLayer.clearLayers();
+  map.closePopup();
 
   const latlngs = data.pathCoordinates.map((p) => [p.lat, p.lon]);
   L.polyline(latlngs, { color: "#14B8A6", weight: 5, opacity: 0.85 }).addTo(resultLayer);
@@ -171,7 +172,7 @@ function renderRoute(data) {
   }
 
   if (latlngs.length > 1) {
-    map.fitBounds(L.polyline(latlngs).getBounds(), { padding: [40, 40] });
+    map.fitBounds(L.polyline(latlngs).getBounds(), { padding: [50, 50], maxZoom: 13 });
   }
 
   const routeLabel = selectedAlgorithm === "astar" ? "Fastest Route" : "Shortest Route";
