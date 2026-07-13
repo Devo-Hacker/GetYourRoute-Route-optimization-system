@@ -34,3 +34,8 @@ export async function searchPlace(query) {
   return { lat: parseFloat(data[0].lat), lon: parseFloat(data[0].lon), name: data[0].display_name };
 }
 
+export async function fetchNearby(lat, lon, type) {
+  const res = await fetch(`${API_BASE_URL}/nearby?lat=${lat}&lon=${lon}&type=${type}`);
+  if (!res.ok) throw new Error("Nearby search failed");
+  return res.json();
+}

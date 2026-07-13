@@ -1,4 +1,4 @@
-import { fetchRoute, reverseGeocode, searchPlace } from "./api.js";
+import { fetchRoute, reverseGeocode, searchPlace, fetchNearby } from "./api.js";
 
 const startInput = document.getElementById("startInput");
 const endInput = document.getElementById("endInput");
@@ -15,6 +15,22 @@ const mapSearchInput = document.getElementById("mapSearchInput");
 const mapSearchBtn = document.getElementById("mapSearchBtn");
 const useLocationBtn = document.getElementById("useLocationBtn");
 
+const themeToggle = document.getElementById("themeToggle");
+
+function applyTheme(theme) {
+  document.documentElement.setAttribute("data-theme", theme);
+  themeToggle.textContent = theme === "dark" ? "☀️" : "🌙";
+  localStorage.setItem("theme", theme);
+}
+
+const savedTheme = localStorage.getItem("theme") || "light";
+applyTheme(savedTheme);
+
+themeToggle.addEventListener("click", () => {
+  const current = document.documentElement.getAttribute("data-theme");
+  applyTheme(current === "dark" ? "light" : "dark");
+});
+
 function showToast(message, type = "default") {
   const toast = document.getElementById("toast");
   toast.textContent = message;
@@ -30,16 +46,44 @@ function showToast(message, type = "default") {
 let selectedAlgorithm = "dijkstra";
 let pickingField = null;
 
-// Beautiful colorful tile set — CARTO Voyager, free, no key
 const map = L.map("map").setView([23.03, 72.58], 13);
 
-L.tileLayer(
+const streetLayer = L.tileLayer(
   "https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png",
   {
     attribution: '&copy; OpenStreetMap contributors &copy; CARTO',
     subdomains: "abcd",
     maxZoom: 20,
   }
+);
+
+const satelliteLayer = L.tileLayer(
+  "https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}",
+  {
+    attribution: "Tiles &copy; Esri — Source: Esri, Maxar, Earthstar Geographics",
+    maxZoom: 19,
+  }
+);
+
+const terrainLayer = L.tileLayer(
+  "https://{s}.basemaps.cartocdn.com/rastertiles/voyager_labels_under/{z}/{x}/{y}{r}.png",
+  {
+    attribution: '&copy; OpenStreetMap contributors &copy; CARTO',
+    subdomains: "abcd",
+    maxZoom: 20,
+  }
+);
+
+streetLayer.addTo(map); // default view on load
+
+L.control.layers(
+  {
+    "Street": streetLayer,
+    "Satellite": satelliteLayer,
+    "Terrain": terrainLayer,
+  },
+  {},
+  { position: "topright", collapsed: true }
 ).addTo(map);
 
 const resultLayer = L.layerGroup().addTo(map);
@@ -72,13 +116,11 @@ vehicleButtons.forEach((btn) => {
     mileageInput.placeholder = btn.dataset.mileage;
     speedInput.placeholder = btn.dataset.speed;
 
-    // Only overwrite the actual value if the user hasn't typed their own custom number
     if (!mileageInput.dataset.userEdited) mileageInput.value = "";
     if (!speedInput.dataset.userEdited) speedInput.value = "";
   });
 });
 
-// Track if the user manually typed a value, so switching vehicles doesn't overwrite their custom input
 mileageInput.addEventListener("input", () => {
   mileageInput.dataset.userEdited = "true";
 });
@@ -259,4 +301,34 @@ useLocationBtn.addEventListener("click", () => {
     },
     { enableHighAccuracy: true, timeout: 8000 }
   );
+});
+
+// ---------- Nearby POI search ----------
+
+const poiButtons = document.querySelectorAll(".poi-btn");
+let poiLayer = L.layerGroup().addTo(map);
+
+poiButtons.forEach((btn) => {
+  btn.addEventListener("click", async () => {
+    const isActive = btn.classList.contains("is-active");
+    poiButtons.forEach((b) => b.classList.remove("is-active"));
+    poiLayer.clearLayers();
+
+    if (isActive) return;
+
+    btn.classList.add("is-active");
+    const center = map.getCenter();
+
+    try {
+      const { results } = await fetchNearby(center.lat, center.lng, btn.dataset.type);
+      results.forEach((place) => {
+        L.marker([place.lat, place.lon])
+          .addTo(poiLayer)
+          .bindPopup(place.name);
+      });
+      showToast(`Found ${results.length} nearby`, "success");
+    } catch (err) {
+      showToast("Couldn't load nearby places", "error");
+    }
+  });
 });

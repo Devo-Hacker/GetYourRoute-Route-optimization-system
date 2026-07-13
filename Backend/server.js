@@ -5,6 +5,8 @@ import { dijkstra } from "./dijkstra.js";
 import { aStar } from "./astar.js";
 import { geocodeAddress } from "./geocode.js";
 import { fetchRoadNetwork, buildGraph } from "./graphBuilder.js";
+import axios from "axios";
+const OVERPASS_URL = "https://overpass-api.de/api/interpreter";
 
 dotenv.config();
 
@@ -157,6 +159,48 @@ app.post("/route", async (req, res) => {
   }
 });
 
+const POI_TAGS = {
+  hotel: 'tourism=hotel',
+  hospital: 'amenity=hospital',
+  railway: 'railway=station',
+  restaurant: 'amenity=restaurant',
+  atm: 'amenity=atm',
+};
+
+app.get("/nearby", async (req, res) => {
+  try {
+    const { lat, lon, type, radius = 3000 } = req.query;
+    if (!lat || !lon || !POI_TAGS[type]) {
+      return res.status(400).json({ error: "Missing or invalid lat, lon, or type." });
+    }
+
+    const [key, value] = POI_TAGS[type].split("=");
+    const query = `
+      [out:json][timeout:25];
+      node["${key}"="${value}"](around:${radius},${lat},${lon});
+      out body;
+    `;
+
+    const response = await axios.post(OVERPASS_URL, query, {
+      headers: {
+        "Content-Type": "text/plain",
+        "User-Agent": "RouteOptimizerProject/1.0 (student project)",
+        "Accept": "application/json",
+      },
+    });
+
+    const results = response.data.elements.map((el) => ({
+      id: el.id,
+      lat: el.lat,
+      lon: el.lon,
+      name: el.tags?.name || "Unnamed",
+    }));
+
+    res.json({ results });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
 
 app.listen(PORT, () => {
   console.log(`Server running on http://localhost:${PORT}`);

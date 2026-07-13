@@ -14,11 +14,12 @@
 
 <div class="app">
   <header class="topbar">
-    <div class="brand">
-      <span class="brand-icon">🧭</span>
-      <span class="brand-name">Route Optimizer</span>
-    </div>
-  </header>
+  <div class="brand">
+    <span class="brand-icon">🧭</span>
+    <span class="brand-name">Route Optimizer</span>
+  </div>
+  <button type="button" id="themeToggle" class="theme-toggle" title="Toggle dark mode">🌙</button>
+</header>
 
   <div class="layout">
     <aside class="panel">
@@ -80,6 +81,11 @@
     <button type="button" id="mapSearchBtn" title="Search">🔍</button>
     <button type="button" id="useLocationBtn" title="Use my current location">📍</button>
   </div>
+  <div class="poi-buttons" id="poiButtons">
+  <button type="button" class="poi-btn" data-type="hotel">🏨 Hotels</button>
+  <button type="button" class="poi-btn" data-type="hospital">🏥 Hospitals</button>
+  <button type="button" class="poi-btn" data-type="railway">🚉 Stations</button>
+</div>
   <div id="map"></div>
   <div class="map-hint" id="mapHint" hidden></div>
 </main>
