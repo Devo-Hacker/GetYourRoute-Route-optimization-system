@@ -14,6 +14,7 @@ const toggleButtons = document.querySelectorAll(".toggle-btn");
 const mapSearchInput = document.getElementById("mapSearchInput");
 const mapSearchBtn = document.getElementById("mapSearchBtn");
 const useLocationBtn = document.getElementById("useLocationBtn");
+const swapBtn = document.getElementById("swapBtn");
 
 const themeToggle = document.getElementById("themeToggle");
 
@@ -146,6 +147,24 @@ function setPicking(field) {
 pickStartBtn.addEventListener("click", () => setPicking("start"));
 pickEndBtn.addEventListener("click", () => setPicking("end"));
 
+swapBtn.addEventListener("click", () => {
+  const temp = startInput.value;
+  startInput.value = endInput.value;
+  endInput.value = temp;
+
+  // Also swap any markers already placed on the map for start/end
+  const tempMarker = pickTempMarkers.start;
+  pickTempMarkers.start = pickTempMarkers.end;
+  pickTempMarkers.end = tempMarker;
+
+  if (pickTempMarkers.start) {
+    pickTempMarkers.start.setIcon(markerIcon("origin", 14));
+  }
+  if (pickTempMarkers.end) {
+    pickTempMarkers.end.setIcon(markerIcon("destination", 14));
+  }
+});
+
 map.on("click", async (e) => {
   if (!pickingField) return;
   const field = pickingField;
@@ -239,6 +258,8 @@ async function handleMapSearch() {
   const query = mapSearchInput.value.trim();
   if (!query) return;
 
+  mapSearchBtn.classList.add("is-loading");
+
   try {
     const place = await searchPlace(query);
     map.setView([place.lat, place.lon], 15);
@@ -246,7 +267,9 @@ async function handleMapSearch() {
     if (searchMarker) map.removeLayer(searchMarker);
     searchMarker = L.marker([place.lat, place.lon]).addTo(map).bindPopup(place.name).openPopup();
   } catch (err) {
-    alert(err.message || "Could not find that place.");
+    showToast(err.message || "Could not find that place.", "error");
+  } finally {
+    mapSearchBtn.classList.remove("is-loading");
   }
 }
 
@@ -316,7 +339,7 @@ poiButtons.forEach((btn) => {
 
     if (isActive) return;
 
-    btn.classList.add("is-active");
+    btn.classList.add("is-active", "is-loading");
     const center = map.getCenter();
 
     try {
@@ -329,6 +352,8 @@ poiButtons.forEach((btn) => {
       showToast(`Found ${results.length} nearby`, "success");
     } catch (err) {
       showToast("Couldn't load nearby places", "error");
+    } finally {
+      btn.classList.remove("is-loading");
     }
   });
 });

@@ -4,61 +4,83 @@
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
 <title>Route Optimizer</title>
+<link href="https://fonts.googleapis.com/css2?family=Hanken+Grotesk:wght@400;500;600;700;800&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet" />
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&display=block" rel="stylesheet" />
 <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css" />
-<link rel="preconnect" href="https://fonts.googleapis.com" />
-<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-<link href="https://fonts.googleapis.com/css2?family=Poppins:wght@500;600;700&family=Inter:wght@400;500;600&display=swap" rel="stylesheet" />
 <link rel="stylesheet" href="style.css" />
 </head>
 <body>
 
 <div class="app">
-  <header class="topbar">
-  <div class="brand">
-    <span class="brand-icon">🧭</span>
-    <span class="brand-name">Route Optimizer</span>
-  </div>
-  <button type="button" id="themeToggle" class="theme-toggle" title="Toggle dark mode">🌙</button>
-</header>
 
-  <div class="layout">
-    <aside class="panel">
-      <h2 class="panel-title">Plan your route</h2>
+  <header class="topbar">
+    <div class="brand">
+      <span class="material-symbols-outlined brand-icon">explore</span>
+      <span class="brand-name">Route Optimizer</span>
+    </div>
+    <button type="button" id="themeToggle" class="icon-btn" title="Toggle dark mode">
+      <span class="material-symbols-outlined">dark_mode</span>
+    </button>
+  </header>
+
+  <aside class="sidebar">
+    <div class="sidebar-inner">
+      <div class="sidebar-header">
+        <h2>Plan your route</h2>
+        <p>Configure your optimal path</p>
+      </div>
 
       <form id="routeForm">
         <div class="field">
-          <label for="startInput">From</label>
-          <div class="input-row">
-            <input type="text" id="startInput" placeholder="Enter starting point" autocomplete="off" />
-            <button type="button" class="pick-btn" id="pickStartBtn" title="Pick on map">📍</button>
+          <label for="startInput">Starting point</label>
+          <div class="input-icon-row">
+            <span class="material-symbols-outlined field-icon origin-icon">radio_button_checked</span>
+            <input type="text" id="startInput" placeholder="Enter departure point" autocomplete="off" />
+            <button type="button" class="pick-btn" id="pickStartBtn" title="Pick on map">
+              <span class="material-symbols-outlined">place</span>
+            </button>
           </div>
         </div>
 
-        <div class="field">
-          <label for="endInput">To</label>
-          <div class="input-row">
-            <input type="text" id="endInput" placeholder="Enter destination" autocomplete="off" />
-            <button type="button" class="pick-btn" id="pickEndBtn" title="Pick on map">📍</button>
-          </div>
-        </div>
-
-        <div class="field">
-          <label>Route type</label>
-          <div class="toggle-group">
-            <button type="button" class="toggle-btn is-active" data-algo="dijkstra">Shortest Route</button>
-            <button type="button" class="toggle-btn" data-algo="astar">Fastest Route</button>
-          </div>
-        </div>
-
-        <div class="field">
-  <label>Vehicle type</label>
-  <div class="toggle-group">
-    <button type="button" class="toggle-btn vehicle-btn" data-mileage="45" data-speed="35">Bike</button>
-    <button type="button" class="toggle-btn vehicle-btn is-active" data-mileage="15" data-speed="40">Car</button>
-    <button type="button" class="toggle-btn vehicle-btn" data-mileage="4" data-speed="30">Truck</button>
-  </div>
-  
+        <div class="swap-row">
+  <button type="button" class="swap-btn" id="swapBtn" title="Swap start and destination">
+    <span class="material-symbols-outlined">swap_vert</span>
+  </button>
 </div>
+
+        <div class="field">
+          <label for="endInput">Destination</label>
+          <div class="input-icon-row">
+            <span class="material-symbols-outlined field-icon dest-icon">location_on</span>
+            <input type="text" id="endInput" placeholder="Enter destination" autocomplete="off" />
+            <button type="button" class="pick-btn" id="pickEndBtn" title="Pick on map">
+              <span class="material-symbols-outlined">place</span>
+            </button>
+          </div>
+        </div>
+
+        <div class="pref-toggle">
+          <button type="button" class="toggle-btn is-active" data-algo="dijkstra">Shortest</button>
+          <button type="button" class="toggle-btn" data-algo="astar">Fastest</button>
+        </div>
+
+        <div class="field">
+          <label>Vehicle type</label>
+          <div class="vehicle-grid">
+            <button type="button" class="vehicle-btn" data-mileage="45" data-speed="35">
+              <span class="material-symbols-outlined">pedal_bike</span>
+              <span class="vehicle-label">Bike</span>
+            </button>
+            <button type="button" class="vehicle-btn is-active" data-mileage="15" data-speed="40">
+              <span class="material-symbols-outlined">directions_car</span>
+              <span class="vehicle-label">Car</span>
+            </button>
+            <button type="button" class="vehicle-btn" data-mileage="4" data-speed="30">
+              <span class="material-symbols-outlined">local_shipping</span>
+              <span class="vehicle-label">Truck</span>
+            </button>
+          </div>
+        </div>
 
         <div class="field split">
           <div>
@@ -71,32 +93,51 @@
           </div>
         </div>
 
-        <button type="submit" class="compute-btn" id="computeBtn">Find Route</button>
+        <button type="submit" class="compute-btn" id="computeBtn">Find Best Route</button>
       </form>
-    </aside>
 
-   <main class="map-wrap">
-  <div class="map-search">
-    <input type="text" id="mapSearchInput" placeholder="Search a place..." autocomplete="off" />
-    <button type="button" id="mapSearchBtn" title="Search">🔍</button>
-    <button type="button" id="useLocationBtn" title="Use my current location">📍</button>
-  </div>
-  <div class="poi-buttons" id="poiButtons">
-  <button type="button" class="poi-btn" data-type="hotel">🏨 Hotels</button>
-  <button type="button" class="poi-btn" data-type="hospital">🏥 Hospitals</button>
-  <button type="button" class="poi-btn" data-type="railway">🚉 Stations</button>
-</div>
-  <div id="map"></div>
-  <div class="map-hint" id="mapHint" hidden></div>
-</main>
-  </div>
-
-  <section class="results" id="resultsPanel">
-    <div id="resultsBody" class="results-empty">
-      Enter a start and end point, then hit "Find Route" to see your path.
+      <div id="resultsBody" class="results-empty">
+        Enter a start and end point, then hit "Find Best Route" to see your path.
+      </div>
     </div>
-  </section>
+  </aside>
+
+  <main class="map-main">
+    <div id="map"></div>
+
+    <div class="search-overlay">
+      <div class="glass search-bar">
+        <span class="material-symbols-outlined search-icon">search</span>
+        <input type="text" id="mapSearchInput" placeholder="Search for locations, services..." autocomplete="off" />
+        <button type="button" id="mapSearchBtn" class="search-go-btn" title="Search">
+          <span class="material-symbols-outlined">arrow_forward</span>
+        </button>
+      </div>
+
+      <div class="poi-chips">
+        <button type="button" class="glass poi-btn" data-type="hotel">
+          <span class="material-symbols-outlined chip-icon amber">hotel</span> Hotels
+        </button>
+        <button type="button" class="glass poi-btn" data-type="hospital">
+          <span class="material-symbols-outlined chip-icon blue">medical_services</span> Hospitals
+        </button>
+        <button type="button" class="glass poi-btn" data-type="railway">
+          <span class="material-symbols-outlined chip-icon teal">train</span> Stations
+        </button>
+      </div>
+    </div>
+
+    <div class="map-hint" id="mapHint" hidden></div>
+
+    <div class="floating-controls">
+      <button type="button" id="useLocationBtn" class="glass floating-btn location-btn" title="Use my current location">
+        <span class="material-symbols-outlined">my_location</span>
+      </button>
+    </div>
+  </main>
+
   <div id="toast" class="toast" hidden></div>
+
 </div>
 
 <script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
