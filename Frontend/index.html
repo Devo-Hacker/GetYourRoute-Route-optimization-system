@@ -3,28 +3,37 @@
 <head>
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-<title>Route Optimizer</title>
+<title>Get Your Route</title>
 <link href="https://fonts.googleapis.com/css2?family=Hanken+Grotesk:wght@400;500;600;700;800&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet" />
+<link href="https://fonts.googleapis.com/css2?family=Playfair+Display:wght@500;700;800&display=swap" rel="stylesheet" />
 <link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&display=block" rel="stylesheet" />
 <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css" />
 <link rel="stylesheet" href="style.css" />
 </head>
 <body>
 
-<div class="app">
+<div class="app" id="appRoot">
 
   <header class="topbar">
     <div class="brand">
-      <span class="material-symbols-outlined brand-icon">explore</span>
-      <span class="brand-name">Route Optimizer</span>
+      <div class="logo-badge">
+        <svg class="logo-icon" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path d="M17.657 16.657L13.414 20.9a1.998 1.998 0 01-2.827 0l-4.244-4.243a8 8 0 1111.314 0z" stroke-linecap="round" stroke-linejoin="round" stroke-width="2"></path>
+          <path d="M15 11a3 3 0 11-6 0 3 3 0 016 0z" stroke-linecap="round" stroke-linejoin="round" stroke-width="2"></path>
+        </svg>
+      </div>
+      <span class="section-heading">Get Your Route</span>
     </div>
     <button type="button" id="themeToggle" class="icon-btn" title="Toggle dark mode">
       <span class="material-symbols-outlined">dark_mode</span>
     </button>
   </header>
 
-  <aside class="sidebar">
+  <aside class="sidebar" id="sidebar">
+
     <div class="sidebar-inner">
+      <div class="sidebar-drag-handle" id="sidebarDragHandle"></div>
+
       <div class="sidebar-header">
         <h2>Plan your route</h2>
         <p>Configure your optimal path</p>
@@ -43,10 +52,10 @@
         </div>
 
         <div class="swap-row">
-  <button type="button" class="swap-btn" id="swapBtn" title="Swap start and destination">
-    <span class="material-symbols-outlined">swap_vert</span>
-  </button>
-</div>
+          <button type="button" class="swap-btn" id="swapBtn" title="Swap start and destination">
+            <span class="material-symbols-outlined">swap_vert</span>
+          </button>
+        </div>
 
         <div class="field">
           <label for="endInput">Destination</label>
@@ -101,6 +110,10 @@
       </div>
     </div>
   </aside>
+
+  <button type="button" class="sidebar-collapse-btn" id="sidebarCollapseBtn" title="Collapse panel">
+      <span class="material-symbols-outlined">chevron_left</span>
+    </button>
 
   <main class="map-main">
     <div id="map"></div>

@@ -15,8 +15,27 @@ const mapSearchInput = document.getElementById("mapSearchInput");
 const mapSearchBtn = document.getElementById("mapSearchBtn");
 const useLocationBtn = document.getElementById("useLocationBtn");
 const swapBtn = document.getElementById("swapBtn");
+const sidebar = document.getElementById("sidebar");
+const sidebarCollapseBtn = document.getElementById("sidebarCollapseBtn");
+const sidebarDragHandle = document.getElementById("sidebarDragHandle");
+const appEl = document.querySelector(".app");
 
 const themeToggle = document.getElementById("themeToggle");
+
+
+// Desktop collapse toggle
+sidebarCollapseBtn.addEventListener("click", () => {
+  sidebar.classList.toggle("is-collapsed");
+  appEl.classList.toggle("is-sidebar-collapsed");
+  setTimeout(() => map.invalidateSize(), 260);
+});
+
+// Mobile peek/expand toggle
+sidebarDragHandle.addEventListener("click", () => {
+  sidebar.classList.toggle("is-peek");
+  appEl.classList.toggle("is-sidebar-peek");
+  setTimeout(() => map.invalidateSize(), 260);
+});
 
 function applyTheme(theme) {
   document.documentElement.setAttribute("data-theme", theme);
@@ -198,6 +217,7 @@ routeForm.addEventListener("submit", async (e) => {
 
   computeBtn.disabled = true;
   computeBtn.textContent = "Computing...";
+  resultsBody.innerHTML = `<div class="results-empty">This may take a bit longer for long-distance routes...</div>`;
 
   const body = { start, end, algorithm: selectedAlgorithm };
   body.mileage = mileageInput.value ? Number(mileageInput.value) : Number(mileageInput.placeholder);
@@ -357,3 +377,15 @@ poiButtons.forEach((btn) => {
     }
   });
 });
+
+function handleLayoutChange() {
+  if (window.innerWidth <= 900) {
+    sidebar.classList.remove("is-collapsed");
+    appEl.classList.remove("is-sidebar-collapsed");
+  }
+
+  map.invalidateSize();
+}
+
+window.addEventListener("resize", handleLayoutChange);
+handleLayoutChange();
