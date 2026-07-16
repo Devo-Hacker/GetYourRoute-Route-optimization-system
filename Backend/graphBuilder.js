@@ -2,11 +2,15 @@ import axios from "axios";
 import * as turf from "@turf/turf";
 
 const OVERPASS_URL = "https://overpass-api.de/api/interpreter";
-export async function fetchRoadNetwork(bbox) {
+export async function fetchRoadNetwork(bbox, majorRoadsOnly = false) {
+  const roadFilter = majorRoadsOnly
+    ? '["highway"~"^(motorway|trunk|primary|secondary|tertiary|residential)"]'
+    : '["highway"]';
+
   const query = `
-    [out:json][timeout:25];
+    [out:json][timeout:50];
     (
-      way["highway"](${bbox.join(",")});
+      way${roadFilter}(${bbox.join(",")});
     );
     out body;
     >;
@@ -19,6 +23,7 @@ export async function fetchRoadNetwork(bbox) {
       "User-Agent": "RouteOptimizerProject/1.0 (student project)",
       "Accept": "application/json",
     },
+    timeout: 45000,
   });
 
   return response.data;

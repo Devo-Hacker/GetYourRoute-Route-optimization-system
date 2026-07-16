@@ -16,7 +16,7 @@ const PORT = process.env.PORT || 5000;
 app.use(cors());
 app.use(express.json());
 
-const MAX_ROUTE_DISTANCE_KM = 200; // sensible city-to-city cap
+const MAX_ROUTE_DISTANCE_KM = 100; // lowered from 200 to reduce memory usage per request
 
 function haversineKm(a, b) {
   const R = 6371;
@@ -114,19 +114,20 @@ app.post("/route", async (req, res) => {
     }
 
     const bbox = getDynamicBbox(startLocation, endLocation);
-    const osmData = await fetchRoadNetwork(bbox);
+    const osmData = await fetchRoadNetwork(bbox, true); // always exclude non-vehicle road types
     const { graph: roadGraph, nodes } = buildGraph(osmData);
-    const timeGraph = buildTimeGraph(roadGraph);
 
     const startNode = findNearestNode(nodes, startLocation);
     const endNode = findNearestNode(nodes, endLocation);
 
     let result;
     if (algorithm === "astar") {
+      const timeGraph = buildTimeGraph(roadGraph);
       result = aStar(timeGraph, nodes, startNode, endNode, 100);
     } else {
       result = dijkstra(roadGraph, startNode, endNode);
     }
+
     if (!isFinite(result.distance)) {
       return res.status(404).json({
         error: "No connected road path found between these two points.",
