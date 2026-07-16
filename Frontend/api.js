@@ -2,7 +2,7 @@ const isLocal = ["localhost", "127.0.0.1"].includes(window.location.hostname);
 
 export const API_BASE_URL = isLocal
   ? "http://localhost:5000"
-  : "https://getyourroute-route-optimization-system.onrender.com";
+  : "https://getyourroute-route-optimization-system-1.onrender.com";
 
 export async function fetchRoute(payload) {
   const res = await fetch(`${API_BASE_URL}/route`, {
