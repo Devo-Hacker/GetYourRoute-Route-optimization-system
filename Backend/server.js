@@ -1,20 +1,36 @@
 import express from "express";
 import cors from "cors";
 import dotenv from "dotenv";
+import axios from "axios";
 import { dijkstra } from "./dijkstra.js";
 import { aStar } from "./astar.js";
 import { geocodeAddress } from "./geocode.js";
-import { fetchRoadNetwork, buildGraph } from "./graphBuilder.js";
-import axios from "axios";
+import { fetchRoadNetwork, buildGraph, getMaxRoadSpeedKmph } from "./graphBuilder.js";
+
 const OVERPASS_URL = "https://overpass-api.de/api/interpreter";
 
 dotenv.config();
+
+// Catch anything that would otherwise crash the process silently, so Render's
+// Logs tab actually shows *why* the service went down instead of just going quiet.
+process.on("uncaughtException", (err) => {
+  console.error("UNCAUGHT EXCEPTION:", err);
+});
+process.on("unhandledRejection", (reason) => {
+  console.error("UNHANDLED REJECTION:", reason);
+});
 
 const app = express();
 const PORT = process.env.PORT || 5000;
 
 app.use(cors());
 app.use(express.json());
+
+// Basic request logging so every hit shows up in Render logs.
+app.use((req, res, next) => {
+  console.log(`${new Date().toISOString()} ${req.method} ${req.path}`);
+  next();
+});
 
 const MAX_ROUTE_DISTANCE_KM = 100; // lowered from 200 to reduce memory usage per request
 
@@ -40,6 +56,11 @@ function getDynamicBbox(startLoc, endLoc, paddingKm = 4) {
   return [south, west, north, east];
 }
 
+// NOTE: still an O(n) linear scan over every node in the graph. Fine for the
+// bbox sizes this demo pulls (a few thousand nodes), but if you extend
+// MAX_ROUTE_DISTANCE_KM significantly, swap this for a spatial index
+// (e.g. a k-d tree or a geohash/grid bucket lookup) to avoid an O(n) scan
+// twice per request.
 function findNearestNode(nodes, location) {
   let closestNode = null;
   let closestDist = Infinity;
@@ -98,24 +119,53 @@ app.get("/status", (req, res) => {
 });
 
 app.post("/route", async (req, res) => {
+  const { start, end, algorithm, mileage, avgSpeedKmph } = req.body || {};
+
+  if (!start || !end) {
+    return res.status(400).json({ error: "Both start and end are required." });
+  }
+
+  console.log("Route request:", { start, end, algorithm });
+
+  // --- Stage 1: geocoding ---
+  let startLocation, endLocation;
   try {
-    const { start, end, algorithm, mileage, avgSpeedKmph } = req.body;
+    startLocation = await geocodeAddress(start);
+    endLocation = await geocodeAddress(end);
+    console.log("Geocoded:", startLocation, endLocation);
+  } catch (err) {
+    console.error("GEOCODE FAILED:", err.message || err);
+    return res.status(502).json({ error: err.message || "Geocoding failed." });
+  }
 
-    const startLocation = await geocodeAddress(start);
-    const endLocation = await geocodeAddress(end);
+  const straightLineKm = haversineKm(startLocation, endLocation);
+  if (straightLineKm > MAX_ROUTE_DISTANCE_KM) {
+    return res.status(400).json({
+      error: `These points are ~${straightLineKm.toFixed(
+        1
+      )}km apart, which exceeds this demo's supported range (${MAX_ROUTE_DISTANCE_KM}km). Try two closer locations.`,
+    });
+  }
 
-    const straightLineKm = haversineKm(startLocation, endLocation);
-    if (straightLineKm > MAX_ROUTE_DISTANCE_KM) {
-      return res.status(400).json({
-        error: `These points are ~${straightLineKm.toFixed(
-          1
-        )}km apart, which exceeds this demo's supported range (${MAX_ROUTE_DISTANCE_KM}km). Try two closer locations.`,
-      });
-    }
+  const bbox = getDynamicBbox(startLocation, endLocation);
 
-    const bbox = getDynamicBbox(startLocation, endLocation);
-    const osmData = await fetchRoadNetwork(bbox, true); // always exclude non-vehicle road types
+  // --- Stage 2: road network fetch ---
+  let osmData;
+  try {
+    osmData = await fetchRoadNetwork(bbox, true);
+    console.log("OSM elements fetched:", osmData?.elements?.length ?? 0);
+  } catch (err) {
+    console.error("OVERPASS FAILED:", err.message || err);
+    return res.status(502).json({ error: err.message || "Road network fetch failed." });
+  }
+
+  // --- Stage 3: graph build + pathfinding ---
+  try {
     const { graph: roadGraph, nodes } = buildGraph(osmData);
+
+    if (Object.keys(nodes).length === 0) {
+      return res.status(404).json({ error: "No road data found in this area." });
+    }
 
     const startNode = findNearestNode(nodes, startLocation);
     const endNode = findNearestNode(nodes, endLocation);
@@ -123,7 +173,8 @@ app.post("/route", async (req, res) => {
     let result;
     if (algorithm === "astar") {
       const timeGraph = buildTimeGraph(roadGraph);
-      result = aStar(timeGraph, nodes, startNode, endNode, 100);
+      const heuristicSpeedKmph = getMaxRoadSpeedKmph(roadGraph);
+      result = aStar(timeGraph, nodes, startNode, endNode, heuristicSpeedKmph);
     } else {
       result = dijkstra(roadGraph, startNode, endNode);
     }
@@ -156,16 +207,17 @@ app.post("/route", async (req, res) => {
       message: algorithm === "astar" ? "A* time-optimized route found" : "Dijkstra distance-optimized route found",
     });
   } catch (error) {
-    res.status(500).json({ error: error.message });
+    console.error("UNEXPECTED ROUTE ERROR:", error);
+    res.status(500).json({ error: error.message || error.code || "Unexpected server error while computing route." });
   }
 });
 
 const POI_TAGS = {
-  hotel: 'tourism=hotel',
-  hospital: 'amenity=hospital',
-  railway: 'railway=station',
-  restaurant: 'amenity=restaurant',
-  atm: 'amenity=atm',
+  hotel: "tourism=hotel",
+  hospital: "amenity=hospital",
+  railway: "railway=station",
+  restaurant: "amenity=restaurant",
+  atm: "amenity=atm",
 };
 
 app.get("/nearby", async (req, res) => {
@@ -185,9 +237,10 @@ app.get("/nearby", async (req, res) => {
     const response = await axios.post(OVERPASS_URL, query, {
       headers: {
         "Content-Type": "text/plain",
-        "User-Agent": "RouteOptimizerProject/1.0 (student project)",
-        "Accept": "application/json",
+        "User-Agent": "RouteOptimizerProject/1.0 (student project; contact: set-your-email-here)",
+        Accept: "application/json",
       },
+      timeout: 20000,
     });
 
     const results = response.data.elements.map((el) => ({
@@ -199,7 +252,8 @@ app.get("/nearby", async (req, res) => {
 
     res.json({ results });
   } catch (error) {
-    res.status(500).json({ error: error.message });
+    console.error("NEARBY FAILED:", error.message || error);
+    res.status(500).json({ error: error.message || "Nearby search failed." });
   }
 });
 

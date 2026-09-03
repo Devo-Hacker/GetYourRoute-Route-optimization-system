@@ -68,12 +68,19 @@ let pickingField = null;
 
 const map = L.map("map").setView([23.03, 72.58], 13);
 
+// NOTE: CARTO's basemaps.cartocdn.com raster tiles now require a registered
+// API key for hosted/production apps — without one they return placeholder
+// tiles stamped "API KEY REQUIRED" instead of real map imagery. Swapped to
+// the standard OpenStreetMap tile servers below, which remain free for
+// low/moderate-traffic use (still subject to OSM's usage policy — for
+// anything beyond a demo, get a free key from MapTiler or Stadia Maps and
+// swap the URL below).
 const streetLayer = L.tileLayer(
-  "https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png",
+  "https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png",
   {
-    attribution: '&copy; OpenStreetMap contributors &copy; CARTO',
-    subdomains: "abcd",
-    maxZoom: 20,
+    attribution: '&copy; OpenStreetMap contributors',
+    subdomains: "abc",
+    maxZoom: 19,
   }
 );
 
@@ -85,12 +92,14 @@ const satelliteLayer = L.tileLayer(
   }
 );
 
+// Simple labeled variant reusing the same free OSM tiles (CARTO's
+// "voyager_labels_under" terrain variant also required a key).
 const terrainLayer = L.tileLayer(
-  "https://{s}.basemaps.cartocdn.com/rastertiles/voyager_labels_under/{z}/{x}/{y}{r}.png",
+  "https://{s}.tile.opentopomap.org/{z}/{x}/{y}.png",
   {
-    attribution: '&copy; OpenStreetMap contributors &copy; CARTO',
-    subdomains: "abcd",
-    maxZoom: 20,
+    attribution: '&copy; OpenStreetMap contributors, SRTM | &copy; OpenTopoMap (CC-BY-SA)',
+    subdomains: "abc",
+    maxZoom: 17,
   }
 );
 
@@ -226,7 +235,7 @@ routeForm.addEventListener("submit", async (e) => {
   try {
     const data = await fetchRoute(body);
     if (!data.path || data.path.length === 0) {
-      renderError(data.message || "No route found between these points.");
+      renderError(data.message || data.error || "No route found between these points.");
     } else {
       renderRoute(data);
     }

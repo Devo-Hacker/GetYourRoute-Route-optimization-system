@@ -4,15 +4,41 @@ export const API_BASE_URL = isLocal
   ? "http://localhost:5000"
   : "https://getyourroute-route-optimization-system-1.onrender.com";
 
-export async function fetchRoute(payload) {
-  const res = await fetch(`${API_BASE_URL}/route`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(payload),
-  });
+// Render's free tier can take 30-60s to wake from sleep on the first
+// request after inactivity — give /route enough headroom before giving up.
+const ROUTE_TIMEOUT_MS = 65000;
 
-  const data = await res.json();
-  if (!res.ok) throw new Error(data.error || "Route request failed");
+function withTimeout(promise, ms) {
+  return Promise.race([
+    promise,
+    new Promise((_, reject) =>
+      setTimeout(() => reject(new Error("Request timed out. The server may be waking up — try again in a moment.")), ms)
+    ),
+  ]);
+}
+
+export async function fetchRoute(payload) {
+  const res = await withTimeout(
+    fetch(`${API_BASE_URL}/route`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    }),
+    ROUTE_TIMEOUT_MS
+  );
+
+  let data = {};
+  try {
+    data = await res.json();
+  } catch {
+    // response wasn't valid JSON (e.g. a proxy/error page) — fall through
+  }
+
+  if (!res.ok) {
+    const message = data && data.error ? data.error : `Route request failed (HTTP ${res.status})`;
+    throw new Error(message);
+  }
+
   return data;
 }
 
