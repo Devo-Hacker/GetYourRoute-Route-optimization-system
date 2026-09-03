@@ -1,13 +1,10 @@
 import express from "express";
 import cors from "cors";
 import dotenv from "dotenv";
-import axios from "axios";
 import { dijkstra } from "./dijkstra.js";
 import { aStar } from "./astar.js";
 import { geocodeAddress } from "./geocode.js";
-import { fetchRoadNetwork, buildGraph, getMaxRoadSpeedKmph } from "./graphBuilder.js";
-
-const OVERPASS_URL = "https://overpass-api.de/api/interpreter";
+import { fetchRoadNetwork, buildGraph, getMaxRoadSpeedKmph, runOverpassQuery } from "./graphBuilder.js";
 
 dotenv.config();
 
@@ -234,16 +231,9 @@ app.get("/nearby", async (req, res) => {
       out body;
     `;
 
-    const response = await axios.post(OVERPASS_URL, query, {
-      headers: {
-        "Content-Type": "text/plain",
-        "User-Agent": "RouteOptimizerProject/1.0 (student project; contact: set-your-email-here)",
-        Accept: "application/json",
-      },
-      timeout: 20000,
-    });
+    const data = await runOverpassQuery(query, 20000);
 
-    const results = response.data.elements.map((el) => ({
+    const results = data.elements.map((el) => ({
       id: el.id,
       lat: el.lat,
       lon: el.lon,

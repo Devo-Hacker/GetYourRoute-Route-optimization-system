@@ -1,10 +1,78 @@
 import axios from "axios";
 import * as turf from "@turf/turf";
 
-const OVERPASS_URL = "https://overpass-api.de/api/interpreter";
+// overpass-api.de (the main public instance) actively refuses connections
+// (ECONNREFUSED) from many cloud-hosting IP ranges, including Render's free
+// tier. Try a small set of independently-run public mirrors in order and
+// fall through to the next one on connection failure, rather than hardcoding
+// a single endpoint that may work locally but get blocked in production.
+const OVERPASS_ENDPOINTS = [
+  "https://overpass-api.de/api/interpreter",
+  "https://overpass.kumi.systems/api/interpreter",
+  "https://overpass.openstreetmap.ru/api/interpreter",
+];
 
 function delay(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+// Generic Overpass query runner with mirror fallback — used by both
+// fetchRoadNetwork (road graph) and the /nearby endpoint in server.js,
+// so both benefit from the same fallback behavior instead of duplicating it.
+export async function runOverpassQuery(query, timeoutMs = 45000) {
+  let lastError;
+
+  for (const endpoint of OVERPASS_ENDPOINTS) {
+    for (let attempt = 1; attempt <= 2; attempt++) {
+      try {
+        const response = await axios.post(endpoint, query, {
+          headers: {
+            "Content-Type": "text/plain",
+            "User-Agent": "RouteOptimizerProject/1.0 (student project; contact: set-your-email-here)",
+            Accept: "application/json",
+          },
+          timeout: timeoutMs,
+        });
+
+        if (attempt > 1 || endpoint !== OVERPASS_ENDPOINTS[0]) {
+          console.log(`Overpass succeeded via fallback endpoint: ${endpoint}`);
+        }
+
+        return response.data;
+      } catch (err) {
+        lastError = err;
+
+        const status = err.response?.status;
+        const isConnectionLevelFailure = !status;
+        const isRetryableOnSameEndpoint = status === 429 || status >= 500;
+
+        console.error(
+          `OVERPASS endpoint failed [${endpoint}] attempt ${attempt}:`,
+          err.code || status || err.message
+        );
+
+        if (isConnectionLevelFailure) break;
+        if (attempt < 2 && isRetryableOnSameEndpoint) {
+          await delay(1500);
+          continue;
+        }
+        break;
+      }
+    }
+  }
+
+  const status = lastError?.response?.status;
+  const detail =
+    lastError?.message ||
+    (lastError?.errors && lastError.errors.map((e) => e.message).join("; ")) ||
+    lastError?.code ||
+    "Unknown Overpass error";
+
+  throw new Error(
+    status
+      ? `Overpass request failed on all endpoints (HTTP ${status}): ${detail}`
+      : `Overpass request failed on all endpoints: ${detail}`
+  );
 }
 
 export async function fetchRoadNetwork(bbox, majorRoadsOnly = false) {
@@ -22,46 +90,7 @@ export async function fetchRoadNetwork(bbox, majorRoadsOnly = false) {
     out skel qt;
   `;
 
-  let lastError;
-
-  for (let attempt = 1; attempt <= 2; attempt++) {
-    try {
-      const response = await axios.post(OVERPASS_URL, query, {
-        headers: {
-          "Content-Type": "text/plain",
-          "User-Agent": "RouteOptimizerProject/1.0 (student project; contact: set-your-email-here)",
-          Accept: "application/json",
-        },
-        timeout: 45000,
-      });
-
-      return response.data;
-    } catch (err) {
-      lastError = err;
-
-      const status = err.response?.status;
-      const isRetryable = !status || status === 429 || status >= 500;
-
-      if (attempt < 2 && isRetryable) {
-        await delay(1500);
-        continue;
-      }
-      break;
-    }
-  }
-
-  const status = lastError.response?.status;
-  const detail =
-    lastError.message ||
-    (lastError.errors && lastError.errors.map((e) => e.message).join("; ")) ||
-    lastError.code ||
-    "Unknown Overpass error";
-
-  throw new Error(
-    status
-      ? `Overpass request failed (HTTP ${status}): ${detail}`
-      : `Overpass request failed: ${detail}`
-  );
+  return runOverpassQuery(query, 45000);
 }
 
 function estimateSpeedKmph(tags) {
