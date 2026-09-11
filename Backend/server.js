@@ -4,12 +4,11 @@ import dotenv from "dotenv";
 import { dijkstra } from "./dijkstra.js";
 import { aStar } from "./astar.js";
 import { geocodeAddress } from "./geocode.js";
-import { fetchRoadNetwork, buildGraph, getMaxRoadSpeedKmph, runOverpassQuery } from "./graphBuilder.js";
+import { reverseGeocode, searchPlace, nearbyPOI } from "./places.js";
+import { fetchRoadNetwork, buildGraph, getMaxRoadSpeedKmph } from "./graphBuilder.js";
 
 dotenv.config();
 
-// Catch anything that would otherwise crash the process silently, so Render's
-// Logs tab actually shows *why* the service went down instead of just going quiet.
 process.on("uncaughtException", (err) => {
   console.error("UNCAUGHT EXCEPTION:", err);
 });
@@ -23,13 +22,12 @@ const PORT = process.env.PORT || 5000;
 app.use(cors());
 app.use(express.json());
 
-// Basic request logging so every hit shows up in Render logs.
 app.use((req, res, next) => {
   console.log(`${new Date().toISOString()} ${req.method} ${req.path}`);
   next();
 });
 
-const MAX_ROUTE_DISTANCE_KM = 30; // lowered from 200 to reduce memory usage per request
+const MAX_ROUTE_DISTANCE_KM = 30;
 
 function haversineKm(a, b) {
   const R = 6371;
@@ -53,11 +51,6 @@ function getDynamicBbox(startLoc, endLoc, paddingKm = 4) {
   return [south, west, north, east];
 }
 
-// NOTE: still an O(n) linear scan over every node in the graph. Fine for the
-// bbox sizes this demo pulls (a few thousand nodes), but if you extend
-// MAX_ROUTE_DISTANCE_KM significantly, swap this for a spatial index
-// (e.g. a k-d tree or a geohash/grid bucket lookup) to avoid an O(n) scan
-// twice per request.
 function findNearestNode(nodes, location) {
   let closestNode = null;
   let closestDist = Infinity;
@@ -124,17 +117,16 @@ app.post("/route", async (req, res) => {
 
   console.log("Route request:", { start, end, algorithm });
 
-  // --- Stage 1: geocoding ---
   let startLocation, endLocation;
   try {
-console.time("GEOCODING");
+    console.time("GEOCODING");
 
-const [startLocation, endLocation] = await Promise.all([
-  geocodeAddress(start),
-  geocodeAddress(end)
-]);
+    [startLocation, endLocation] = await Promise.all([
+      geocodeAddress(start),
+      geocodeAddress(end),
+    ]);
 
-console.timeEnd("GEOCODING");
+    console.timeEnd("GEOCODING");
     console.log("Geocoded:", startLocation, endLocation);
   } catch (err) {
     console.error("GEOCODE FAILED:", err.message || err);
@@ -152,27 +144,29 @@ console.timeEnd("GEOCODING");
 
   const bbox = getDynamicBbox(startLocation, endLocation);
 
-  // --- Stage 2: road network fetch ---
+  // Road network for the graph your own Dijkstra/A* run on still comes from
+  // Overpass — TomTom doesn't expose raw road-graph data, only finished
+  // routes, so it can't replace this piece if you want your own algorithms
+  // doing the actual pathfinding.
   let osmData;
   try {
     console.time("OVERPASS");
 
-osmData = await fetchRoadNetwork(bbox, true);
+    osmData = await fetchRoadNetwork(bbox, true);
 
-console.timeEnd("OVERPASS");
+    console.timeEnd("OVERPASS");
     console.log("OSM elements fetched:", osmData?.elements?.length ?? 0);
   } catch (err) {
     console.error("OVERPASS FAILED:", err.message || err);
     return res.status(502).json({ error: err.message || "Road network fetch failed." });
   }
 
-  // --- Stage 3: graph build + pathfinding ---
   try {
     console.time("GRAPH BUILD");
 
-const { graph: roadGraph, nodes } = buildGraph(osmData);
+    const { graph: roadGraph, nodes } = buildGraph(osmData);
 
-console.timeEnd("GRAPH BUILD");
+    console.timeEnd("GRAPH BUILD");
 
     if (Object.keys(nodes).length === 0) {
       return res.status(404).json({ error: "No road data found in this area." });
@@ -184,26 +178,16 @@ console.timeEnd("GRAPH BUILD");
     let result;
     console.time("ALGORITHM");
 
-if (algorithm === "astar") {
-  const timeGraph = buildTimeGraph(roadGraph);
-  const heuristicSpeedKmph = getMaxRoadSpeedKmph(roadGraph);
+    if (algorithm === "astar") {
+      const timeGraph = buildTimeGraph(roadGraph);
+      const heuristicSpeedKmph = getMaxRoadSpeedKmph(roadGraph);
 
-  result = aStar(
-    timeGraph,
-    nodes,
-    startNode,
-    endNode,
-    heuristicSpeedKmph
-  );
-} else {
-  result = dijkstra(
-    roadGraph,
-    startNode,
-    endNode
-  );
-}
+      result = aStar(timeGraph, nodes, startNode, endNode, heuristicSpeedKmph);
+    } else {
+      result = dijkstra(roadGraph, startNode, endNode);
+    }
 
-console.timeEnd("ALGORITHM");
+    console.timeEnd("ALGORITHM");
 
     if (!isFinite(result.distance)) {
       return res.status(404).json({
@@ -238,37 +222,46 @@ console.timeEnd("ALGORITHM");
   }
 });
 
-const POI_TAGS = {
-  hotel: "tourism=hotel",
-  hospital: "amenity=hospital",
-  railway: "railway=station",
-  restaurant: "amenity=restaurant",
-  atm: "amenity=atm",
-};
+// Reverse geocode (map click) — TomTom, proxied through the backend so the
+// key never reaches the browser.
+app.get("/reverse-geocode", async (req, res) => {
+  try {
+    const { lat, lon } = req.query;
+    if (!lat || !lon) {
+      return res.status(400).json({ error: "lat and lon are required." });
+    }
+    const data = await reverseGeocode(lat, lon);
+    res.json(data);
+  } catch (error) {
+    console.error("REVERSE GEOCODE FAILED:", error.message || error);
+    res.status(500).json({ error: error.message || "Reverse geocode failed." });
+  }
+});
 
+// Search bar — TomTom fuzzy search, proxied through the backend.
+app.get("/search", async (req, res) => {
+  try {
+    const { q } = req.query;
+    if (!q || !q.trim()) {
+      return res.status(400).json({ error: "q is required." });
+    }
+    const data = await searchPlace(q);
+    res.json(data);
+  } catch (error) {
+    console.error("SEARCH FAILED:", error.message || error);
+    res.status(500).json({ error: error.message || "Search failed." });
+  }
+});
+
+// POI chips (Hotels / Hospitals / Stations) — now TomTom instead of Overpass.
 app.get("/nearby", async (req, res) => {
   try {
     const { lat, lon, type, radius = 3000 } = req.query;
-    if (!lat || !lon || !POI_TAGS[type]) {
+    if (!lat || !lon || !type) {
       return res.status(400).json({ error: "Missing or invalid lat, lon, or type." });
     }
 
-    const [key, value] = POI_TAGS[type].split("=");
-    const query = `
-      [out:json][timeout:25];
-      node["${key}"="${value}"](around:${radius},${lat},${lon});
-      out body;
-    `;
-
-    const data = await runOverpassQuery(query, 20000);
-
-    const results = data.elements.map((el) => ({
-      id: el.id,
-      lat: el.lat,
-      lon: el.lon,
-      name: el.tags?.name || "Unnamed",
-    }));
-
+    const results = await nearbyPOI(Number(lat), Number(lon), type, Number(radius));
     res.json({ results });
   } catch (error) {
     console.error("NEARBY FAILED:", error.message || error);

@@ -1,35 +1,35 @@
 import axios from "axios";
 
-const NOMINATIM_URL = "https://nominatim.openstreetmap.org/search";
-// Photon (run by Komoot) is a free, keyless, OSM-backed geocoder — independent
-// infrastructure from Nominatim. Used as a fallback so an arbitrary address
-// typed live (e.g. by a jury member) isn't dependent on a single provider
-// having a good moment.
+const TOMTOM_GEOCODE_URL = "https://api.tomtom.com/search/2/geocode";
+// Photon (run by Komoot) is free, keyless, OSM-backed. Kept only as a
+// fallback for the rare case TomTom itself is briefly down or the key hits
+// its daily quota — so a demo doesn't hard-fail on a single provider.
 const PHOTON_URL = "https://photon.komoot.io/api/";
 
 function delay(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
-async function requestNominatim(address) {
-  const response = await axios.get(NOMINATIM_URL, {
-    params: {
-      q: address,
-      format: "json",
-      limit: 1,
-    },
-    headers: {
-      "User-Agent": "RouteOptimizerProject/1.0 (student project; contact: set-your-email-here)",
-      Accept: "application/json",
-    },
-    timeout: 5000, // fail fast instead of hanging the whole /route request
-  });
+async function requestTomTom(address) {
+  const apiKey = process.env.TOMTOM_API_KEY;
+  if (!apiKey) {
+    throw new Error("TOMTOM_API_KEY is not set in the environment.");
+  }
 
-  if (!response.data || response.data.length === 0) {
+  const response = await axios.get(
+    `${TOMTOM_GEOCODE_URL}/${encodeURIComponent(address)}.json`,
+    {
+      params: { key: apiKey, limit: 1 },
+      timeout: 8000,
+    }
+  );
+
+  const result = response.data?.results?.[0];
+  if (!result) {
     throw new Error(`Location not found: ${address}`);
   }
 
-  const { lat, lon } = response.data[0];
+  const { lat, lon } = result.position;
   return { lat: parseFloat(lat), lon: parseFloat(lon) };
 }
 
@@ -55,16 +55,16 @@ export async function geocodeAddress(address) {
   }
 
   const providers = [
-    { name: "Nominatim", fn: requestNominatim },
+    { name: "TomTom", fn: requestTomTom },
     { name: "Photon", fn: requestPhoton },
   ];
 
   let lastError;
 
   for (const provider of providers) {
-    // One quick retry per provider for transient failures, then move to the
-    // next independent provider rather than hammering the same one.
-    for (let attempt = 1; attempt <= 1; attempt++) { {
+    // One retry per provider on transient failures before moving to the
+    // next independent provider.
+    for (let attempt = 1; attempt <= 2; attempt++) {
       try {
         return await provider.fn(address);
       } catch (err) {
@@ -84,7 +84,6 @@ export async function geocodeAddress(address) {
     }
   }
 
-  // Normalize whatever axios/Node threw into a message that's never empty.
   const status = lastError?.response?.status;
   const detail =
     lastError?.message ||
@@ -97,5 +96,4 @@ export async function geocodeAddress(address) {
       ? `Geocoding failed on all providers (HTTP ${status}) for "${address}": ${detail}`
       : `Geocoding failed on all providers for "${address}": ${detail}`
   );
-}
 }

@@ -11,7 +11,7 @@ function withTimeout(promise, ms) {
   return Promise.race([
     promise,
     new Promise((_, reject) =>
-      setTimeout(() => reject(new Error("Route calculation timed out. The server or OpenStreetMap data service may be busy. Please try a shorter route.")), ms)
+      setTimeout(() => reject(new Error("Route calculation timed out. The server or road data service may be busy. Please try a shorter route.")), ms)
     ),
   ]);
 }
@@ -41,22 +41,22 @@ export async function fetchRoute(payload) {
   return data;
 }
 
+// Now proxied through the backend (TomTom Reverse Geocoding API) instead of
+// calling Nominatim directly — the TomTom key stays server-side.
 export async function reverseGeocode(lat, lng) {
-  const res = await fetch(
-    `https://nominatim.openstreetmap.org/reverse?format=json&lat=${lat}&lon=${lng}&zoom=18`
-  );
+  const res = await fetch(`${API_BASE_URL}/reverse-geocode?lat=${lat}&lon=${lng}`);
   if (!res.ok) throw new Error("Reverse geocode failed");
   return res.json();
 }
 
+// Now proxied through the backend (TomTom Search API).
 export async function searchPlace(query) {
-  const res = await fetch(
-    `https://nominatim.openstreetmap.org/search?q=${encodeURIComponent(query)}&format=json&limit=1`
-  );
-  if (!res.ok) throw new Error("Search failed");
-  const data = await res.json();
-  if (data.length === 0) throw new Error("Place not found");
-  return { lat: parseFloat(data[0].lat), lon: parseFloat(data[0].lon), name: data[0].display_name };
+  const res = await fetch(`${API_BASE_URL}/search?q=${encodeURIComponent(query)}`);
+  if (!res.ok) {
+    const data = await res.json().catch(() => ({}));
+    throw new Error(data.error || "Search failed");
+  }
+  return res.json();
 }
 
 export async function fetchNearby(lat, lon, type) {
