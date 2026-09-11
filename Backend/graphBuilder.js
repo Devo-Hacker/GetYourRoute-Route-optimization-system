@@ -3,82 +3,66 @@ import * as turf from "@turf/turf";
 
 // overpass-api.de (the main public instance) actively refuses connections
 // (ECONNREFUSED) from many cloud-hosting IP ranges, including Render's free
-// tier. Try a small set of independently-run public mirrors in order and
-// fall through to the next one on connection failure, rather than hardcoding
-// a single endpoint that may work locally but get blocked in production.
+// tier. We race a small set of independently-run public mirrors in
+// parallel and take whichever responds first, instead of trying them one
+// at a time — a blocked/slow mirror no longer costs us its full timeout
+// before we get to try the next one.
 const OVERPASS_ENDPOINTS = [
   "https://overpass-api.de/api/interpreter",
   "https://overpass.kumi.systems/api/interpreter",
   "https://overpass.openstreetmap.ru/api/interpreter",
 ];
 
-function delay(ms) {
-  return new Promise((resolve) => setTimeout(resolve, ms));
-}
-
-// Generic Overpass query runner with mirror fallback — used by both
-// fetchRoadNetwork (road graph) and the /nearby endpoint in server.js,
-// so both benefit from the same fallback behavior instead of duplicating it.
-export async function runOverpassQuery(query, timeoutMs=20000) {
-  let lastError;
-
-  for (const endpoint of OVERPASS_ENDPOINTS) {
-   for (let attempt = 1; attempt <= 1; attempt++){
-      try {
-        const response = await axios.post(endpoint, query, {
-          headers: {
-            "Content-Type": "text/plain",
-            "User-Agent": "RouteOptimizerProject/1.0 (student project; contact: set-your-email-here)",
-            Accept: "application/json",
-          },
-          timeout: timeoutMs,
-        });
-
-        if (attempt > 1 || endpoint !== OVERPASS_ENDPOINTS[0]) {
-          console.log(`Overpass succeeded via fallback endpoint: ${endpoint}`);
-        }
-
+// Generic Overpass query runner with mirror racing — used by both
+// fetchRoadNetwork (road graph) and the /nearby route, so both benefit.
+export async function runOverpassQuery(query, timeoutMs = 15000) {
+  const attempts = OVERPASS_ENDPOINTS.map((endpoint) =>
+    axios
+      .post(endpoint, query, {
+        headers: {
+          "Content-Type": "text/plain",
+          "User-Agent": "RouteOptimizerProject/1.0 (student project; contact: set-your-email-here)",
+          Accept: "application/json",
+        },
+        timeout: timeoutMs,
+      })
+      .then((response) => {
+        console.log(`Overpass succeeded via: ${endpoint}`);
         return response.data;
-      } catch (err) {
-        lastError = err;
-
+      })
+      .catch((err) => {
         const status = err.response?.status;
-        const isConnectionLevelFailure = !status;
-        const isRetryableOnSameEndpoint = status === 429 || status >= 500;
-
-        console.error(
-          `OVERPASS endpoint failed [${endpoint}] attempt ${attempt}:`,
-          err.code || status || err.message
-        );
-
-        if (isConnectionLevelFailure) break;
-        if (attempt < 2 && isRetryableOnSameEndpoint) {
-          await delay(1500);
-          continue;
-        }
-        break;
-      }
-    }
-  }
-
-  const status = lastError?.response?.status;
-  const detail =
-    lastError?.message ||
-    (lastError?.errors && lastError.errors.map((e) => e.message).join("; ")) ||
-    lastError?.code ||
-    "Unknown Overpass error";
-
-  throw new Error(
-    status
-      ? `Overpass request failed on all endpoints (HTTP ${status}): ${detail}`
-      : `Overpass request failed on all endpoints: ${detail}`
+        console.error(`OVERPASS endpoint failed [${endpoint}]:`, err.code || status || err.message);
+        throw err; // rethrow so Promise.any treats this endpoint as rejected
+      })
   );
+
+  try {
+    // Resolves as soon as ONE mirror succeeds. If all reject, this throws
+    // an AggregateError containing every individual failure.
+    return await Promise.any(attempts);
+  } catch (aggregateError) {
+    const errors = aggregateError.errors || [];
+    const lastError = errors[errors.length - 1];
+    const status = lastError?.response?.status;
+    const detail =
+      lastError?.message ||
+      (lastError?.errors && lastError.errors.map((e) => e.message).join("; ")) ||
+      lastError?.code ||
+      "Unknown Overpass error";
+
+    throw new Error(
+      status
+        ? `Overpass request failed on all endpoints (HTTP ${status}): ${detail}`
+        : `Overpass request failed on all endpoints: ${detail}`
+    );
+  }
 }
 
 export async function fetchRoadNetwork(bbox, majorRoadsOnly = false) {
- const roadFilter = majorRoadsOnly
-  ? '["highway"~"^(motorway|trunk|primary|secondary|tertiary|residential|unclassified|service|living_street)$"]'
-  : '["highway"]';
+  const roadFilter = majorRoadsOnly
+    ? '["highway"~"^(motorway|trunk|primary|secondary|tertiary|residential|unclassified|service|living_street)$"]'
+    : '["highway"]';
 
   const query = `
     [out:json][timeout:15];
@@ -90,7 +74,7 @@ export async function fetchRoadNetwork(bbox, majorRoadsOnly = false) {
     out skel qt;
   `;
 
-  return runOverpassQuery(query, 20000);
+  return runOverpassQuery(query, 15000);
 }
 
 function estimateSpeedKmph(tags) {

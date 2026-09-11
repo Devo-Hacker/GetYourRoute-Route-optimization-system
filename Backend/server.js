@@ -108,6 +108,14 @@ app.get("/status", (req, res) => {
   res.json({ ready: true, mode: "dynamic-global", maxDistanceKm: MAX_ROUTE_DISTANCE_KM });
 });
 
+app.get("/health", (req, res) => {
+  res.status(200).json({
+    status: "ok",
+    uptimeSeconds: Math.floor(process.uptime()),
+    timestamp: new Date().toISOString(),
+  });
+});
+
 app.post("/route", async (req, res) => {
   const { start, end, algorithm, mileage, avgSpeedKmph } = req.body || {};
 
