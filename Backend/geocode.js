@@ -22,7 +22,7 @@ async function requestNominatim(address) {
       "User-Agent": "RouteOptimizerProject/1.0 (student project; contact: set-your-email-here)",
       Accept: "application/json",
     },
-    timeout: 8000, // fail fast instead of hanging the whole /route request
+    timeout: 5000, // fail fast instead of hanging the whole /route request
   });
 
   if (!response.data || response.data.length === 0) {
@@ -64,7 +64,7 @@ export async function geocodeAddress(address) {
   for (const provider of providers) {
     // One quick retry per provider for transient failures, then move to the
     // next independent provider rather than hammering the same one.
-    for (let attempt = 1; attempt <= 2; attempt++) {
+    for (let attempt = 1; attempt <= 1; attempt++) { {
       try {
         return await provider.fn(address);
       } catch (err) {
@@ -97,4 +97,5 @@ export async function geocodeAddress(address) {
       ? `Geocoding failed on all providers (HTTP ${status}) for "${address}": ${detail}`
       : `Geocoding failed on all providers for "${address}": ${detail}`
   );
+}
 }

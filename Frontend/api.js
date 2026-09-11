@@ -6,13 +6,12 @@ export const API_BASE_URL = isLocal
 
 // Render's free tier can take 30-60s to wake from sleep on the first
 // request after inactivity — give /route enough headroom before giving up.
-const ROUTE_TIMEOUT_MS = 65000;
-
+const ROUTE_TIMEOUT_MS = 45000;
 function withTimeout(promise, ms) {
   return Promise.race([
     promise,
     new Promise((_, reject) =>
-      setTimeout(() => reject(new Error("Request timed out. The server may be waking up — try again in a moment.")), ms)
+      setTimeout(() => reject(new Error("Route calculation timed out. The server or OpenStreetMap data service may be busy. Please try a shorter route.")), ms)
     ),
   ]);
 }

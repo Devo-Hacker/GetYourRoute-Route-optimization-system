@@ -19,11 +19,11 @@ function delay(ms) {
 // Generic Overpass query runner with mirror fallback — used by both
 // fetchRoadNetwork (road graph) and the /nearby endpoint in server.js,
 // so both benefit from the same fallback behavior instead of duplicating it.
-export async function runOverpassQuery(query, timeoutMs = 45000) {
+export async function runOverpassQuery(query, timeoutMs=20000) {
   let lastError;
 
   for (const endpoint of OVERPASS_ENDPOINTS) {
-    for (let attempt = 1; attempt <= 2; attempt++) {
+   for (let attempt = 1; attempt <= 1; attempt++){
       try {
         const response = await axios.post(endpoint, query, {
           headers: {
@@ -76,12 +76,12 @@ export async function runOverpassQuery(query, timeoutMs = 45000) {
 }
 
 export async function fetchRoadNetwork(bbox, majorRoadsOnly = false) {
-  const roadFilter = majorRoadsOnly
-    ? '["highway"~"^(motorway|trunk|primary|secondary|tertiary|residential)"]'
-    : '["highway"]';
+ const roadFilter = majorRoadsOnly
+  ? '["highway"~"^(motorway|trunk|primary|secondary|tertiary|residential|unclassified|service|living_street)$"]'
+  : '["highway"]';
 
   const query = `
-    [out:json][timeout:50];
+    [out:json][timeout:15];
     (
       way${roadFilter}(${bbox.join(",")});
     );
@@ -90,7 +90,7 @@ export async function fetchRoadNetwork(bbox, majorRoadsOnly = false) {
     out skel qt;
   `;
 
-  return runOverpassQuery(query, 45000);
+  return runOverpassQuery(query, 20000);
 }
 
 function estimateSpeedKmph(tags) {

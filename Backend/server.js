@@ -29,7 +29,7 @@ app.use((req, res, next) => {
   next();
 });
 
-const MAX_ROUTE_DISTANCE_KM = 100; // lowered from 200 to reduce memory usage per request
+const MAX_ROUTE_DISTANCE_KM = 30; // lowered from 200 to reduce memory usage per request
 
 function haversineKm(a, b) {
   const R = 6371;
@@ -127,8 +127,14 @@ app.post("/route", async (req, res) => {
   // --- Stage 1: geocoding ---
   let startLocation, endLocation;
   try {
-    startLocation = await geocodeAddress(start);
-    endLocation = await geocodeAddress(end);
+console.time("GEOCODING");
+
+const [startLocation, endLocation] = await Promise.all([
+  geocodeAddress(start),
+  geocodeAddress(end)
+]);
+
+console.timeEnd("GEOCODING");
     console.log("Geocoded:", startLocation, endLocation);
   } catch (err) {
     console.error("GEOCODE FAILED:", err.message || err);
@@ -149,7 +155,11 @@ app.post("/route", async (req, res) => {
   // --- Stage 2: road network fetch ---
   let osmData;
   try {
-    osmData = await fetchRoadNetwork(bbox, true);
+    console.time("OVERPASS");
+
+osmData = await fetchRoadNetwork(bbox, true);
+
+console.timeEnd("OVERPASS");
     console.log("OSM elements fetched:", osmData?.elements?.length ?? 0);
   } catch (err) {
     console.error("OVERPASS FAILED:", err.message || err);
@@ -158,7 +168,11 @@ app.post("/route", async (req, res) => {
 
   // --- Stage 3: graph build + pathfinding ---
   try {
-    const { graph: roadGraph, nodes } = buildGraph(osmData);
+    console.time("GRAPH BUILD");
+
+const { graph: roadGraph, nodes } = buildGraph(osmData);
+
+console.timeEnd("GRAPH BUILD");
 
     if (Object.keys(nodes).length === 0) {
       return res.status(404).json({ error: "No road data found in this area." });
@@ -168,13 +182,28 @@ app.post("/route", async (req, res) => {
     const endNode = findNearestNode(nodes, endLocation);
 
     let result;
-    if (algorithm === "astar") {
-      const timeGraph = buildTimeGraph(roadGraph);
-      const heuristicSpeedKmph = getMaxRoadSpeedKmph(roadGraph);
-      result = aStar(timeGraph, nodes, startNode, endNode, heuristicSpeedKmph);
-    } else {
-      result = dijkstra(roadGraph, startNode, endNode);
-    }
+    console.time("ALGORITHM");
+
+if (algorithm === "astar") {
+  const timeGraph = buildTimeGraph(roadGraph);
+  const heuristicSpeedKmph = getMaxRoadSpeedKmph(roadGraph);
+
+  result = aStar(
+    timeGraph,
+    nodes,
+    startNode,
+    endNode,
+    heuristicSpeedKmph
+  );
+} else {
+  result = dijkstra(
+    roadGraph,
+    startNode,
+    endNode
+  );
+}
+
+console.timeEnd("ALGORITHM");
 
     if (!isFinite(result.distance)) {
       return res.status(404).json({
@@ -247,6 +276,6 @@ app.get("/nearby", async (req, res) => {
   }
 });
 
-app.listen(PORT, () => {
-  console.log(`Server running on http://localhost:${PORT}`);
+app.listen(PORT, "0.0.0.0", () => {
+  console.log(`Server running on port ${PORT}`);
 });
