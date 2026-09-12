@@ -6,7 +6,7 @@ export const API_BASE_URL = isLocal
 
 // Render's free tier can take 30-60s to wake from sleep on the first
 // request after inactivity — give /route enough headroom before giving up.
-const ROUTE_TIMEOUT_MS = 45000;
+const ROUTE_TIMEOUT_MS = 60000;
 function withTimeout(promise, ms) {
   return Promise.race([
     promise,

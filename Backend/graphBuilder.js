@@ -74,7 +74,7 @@ export async function fetchRoadNetwork(bbox, majorRoadsOnly = false) {
     out skel qt;
   `;
 
-  return runOverpassQuery(query, 15000);
+  return runOverpassQuery(query, 25000);
 }
 
 function estimateSpeedKmph(tags) {
