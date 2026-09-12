@@ -2,7 +2,7 @@ const isLocal = ["localhost", "127.0.0.1"].includes(window.location.hostname);
 
 export const API_BASE_URL = isLocal
   ? "http://localhost:5000"
-  : "https://getyourroute-route-optimization-system-1.onrender.com";
+  : "https://getyourroute-route-optimization-system-2.onrender.com";
 
 // Render's free tier can take 30-60s to wake from sleep on the first
 // request after inactivity — give /route enough headroom before giving up.
