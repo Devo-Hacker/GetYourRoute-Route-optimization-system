@@ -6,6 +6,7 @@ import { aStar } from "./astar.js";
 import { geocodeAddress } from "./geocode.js";
 import { reverseGeocode, searchPlace, nearbyPOI } from "./places.js";
 import { fetchRoadNetwork, buildGraph, getMaxRoadSpeedKmph } from "./graphBuilder.js";
+import { findCachedRegionForPoints, loadCachedRegionData } from "./cachedRegions.js";
 
 dotenv.config();
 
@@ -27,7 +28,7 @@ app.use((req, res, next) => {
   next();
 });
 
-const MAX_ROUTE_DISTANCE_KM = 30;
+const MAX_ROUTE_DISTANCE_KM = 100;
 
 function haversineKm(a, b) {
   const R = 6371;
@@ -108,14 +109,6 @@ app.get("/status", (req, res) => {
   res.json({ ready: true, mode: "dynamic-global", maxDistanceKm: MAX_ROUTE_DISTANCE_KM });
 });
 
-app.get("/health", (req, res) => {
-  res.status(200).json({
-    status: "ok",
-    uptimeSeconds: Math.floor(process.uptime()),
-    timestamp: new Date().toISOString(),
-  });
-});
-
 app.post("/route", async (req, res) => {
   const { start, end, algorithm, mileage, avgSpeedKmph } = req.body || {};
 
@@ -125,16 +118,17 @@ app.post("/route", async (req, res) => {
 
   console.log("Route request:", { start, end, algorithm });
 
+  // --- Stage 1: geocoding ---
   let startLocation, endLocation;
   try {
-    console.time("GEOCODING");
+    const geocodeStart = Date.now();
 
     [startLocation, endLocation] = await Promise.all([
       geocodeAddress(start),
       geocodeAddress(end),
     ]);
 
-    console.timeEnd("GEOCODING");
+    console.log(`GEOCODING: ${Date.now() - geocodeStart}ms`);
     console.log("Geocoded:", startLocation, endLocation);
   } catch (err) {
     console.error("GEOCODE FAILED:", err.message || err);
@@ -150,31 +144,38 @@ app.post("/route", async (req, res) => {
     });
   }
 
-  const bbox = getDynamicBbox(startLocation, endLocation);
-
-  // Road network for the graph your own Dijkstra/A* run on still comes from
-  // Overpass — TomTom doesn't expose raw road-graph data, only finished
-  // routes, so it can't replace this piece if you want your own algorithms
-  // doing the actual pathfinding.
+  // --- Stage 2: road network (cached city first, live Overpass fallback) ---
   let osmData;
-  try {
-    console.time("OVERPASS");
+  const cachedRegion = findCachedRegionForPoints(startLocation, endLocation);
 
-    osmData = await fetchRoadNetwork(bbox, true);
-
-    console.timeEnd("OVERPASS");
-    console.log("OSM elements fetched:", osmData?.elements?.length ?? 0);
-  } catch (err) {
-    console.error("OVERPASS FAILED:", err.message || err);
-    return res.status(502).json({ error: err.message || "Road network fetch failed." });
+  if (cachedRegion) {
+    try {
+      console.log(`Using cached road data: ${cachedRegion.name}`);
+      osmData = loadCachedRegionData(cachedRegion);
+    } catch (err) {
+      console.error("CACHE LOAD FAILED, falling back to live Overpass:", err.message || err);
+    }
   }
 
+  if (!osmData) {
+    const bbox = getDynamicBbox(startLocation, endLocation);
+    const overpassStart = Date.now();
+    try {
+      osmData = await fetchRoadNetwork(bbox, true);
+      console.log("OSM elements fetched:", osmData?.elements?.length ?? 0);
+    } catch (err) {
+      console.error("OVERPASS FAILED:", err.message || err);
+      return res.status(502).json({ error: err.message || "Road network fetch failed." });
+    } finally {
+      console.log(`OVERPASS: ${Date.now() - overpassStart}ms`);
+    }
+  }
+
+  // --- Stage 3: graph build + pathfinding ---
   try {
-    console.time("GRAPH BUILD");
-
+    const graphBuildStart = Date.now();
     const { graph: roadGraph, nodes } = buildGraph(osmData);
-
-    console.timeEnd("GRAPH BUILD");
+    console.log(`GRAPH BUILD: ${Date.now() - graphBuildStart}ms`);
 
     if (Object.keys(nodes).length === 0) {
       return res.status(404).json({ error: "No road data found in this area." });
@@ -184,7 +185,7 @@ app.post("/route", async (req, res) => {
     const endNode = findNearestNode(nodes, endLocation);
 
     let result;
-    console.time("ALGORITHM");
+    const algoStart = Date.now();
 
     if (algorithm === "astar") {
       const timeGraph = buildTimeGraph(roadGraph);
@@ -195,7 +196,7 @@ app.post("/route", async (req, res) => {
       result = dijkstra(roadGraph, startNode, endNode);
     }
 
-    console.timeEnd("ALGORITHM");
+    console.log(`ALGORITHM: ${Date.now() - algoStart}ms`);
 
     if (!isFinite(result.distance)) {
       return res.status(404).json({
@@ -230,8 +231,6 @@ app.post("/route", async (req, res) => {
   }
 });
 
-// Reverse geocode (map click) — TomTom, proxied through the backend so the
-// key never reaches the browser.
 app.get("/reverse-geocode", async (req, res) => {
   try {
     const { lat, lon } = req.query;
@@ -246,7 +245,6 @@ app.get("/reverse-geocode", async (req, res) => {
   }
 });
 
-// Search bar — TomTom fuzzy search, proxied through the backend.
 app.get("/search", async (req, res) => {
   try {
     const { q } = req.query;
@@ -261,7 +259,6 @@ app.get("/search", async (req, res) => {
   }
 });
 
-// POI chips (Hotels / Hospitals / Stations) — now TomTom instead of Overpass.
 app.get("/nearby", async (req, res) => {
   try {
     const { lat, lon, type, radius = 3000 } = req.query;

@@ -1,20 +1,12 @@
 import axios from "axios";
 import * as turf from "@turf/turf";
 
-// overpass-api.de (the main public instance) actively refuses connections
-// (ECONNREFUSED) from many cloud-hosting IP ranges, including Render's free
-// tier. We race a small set of independently-run public mirrors in
-// parallel and take whichever responds first, instead of trying them one
-// at a time — a blocked/slow mirror no longer costs us its full timeout
-// before we get to try the next one.
 const OVERPASS_ENDPOINTS = [
   "https://overpass-api.de/api/interpreter",
   "https://overpass.kumi.systems/api/interpreter",
   "https://overpass.openstreetmap.ru/api/interpreter",
 ];
 
-// Generic Overpass query runner with mirror racing — used by both
-// fetchRoadNetwork (road graph) and the /nearby route, so both benefit.
 export async function runOverpassQuery(query, timeoutMs = 15000) {
   const attempts = OVERPASS_ENDPOINTS.map((endpoint) =>
     axios
@@ -33,13 +25,11 @@ export async function runOverpassQuery(query, timeoutMs = 15000) {
       .catch((err) => {
         const status = err.response?.status;
         console.error(`OVERPASS endpoint failed [${endpoint}]:`, err.code || status || err.message);
-        throw err; // rethrow so Promise.any treats this endpoint as rejected
+        throw err;
       })
   );
 
   try {
-    // Resolves as soon as ONE mirror succeeds. If all reject, this throws
-    // an AggregateError containing every individual failure.
     return await Promise.any(attempts);
   } catch (aggregateError) {
     const errors = aggregateError.errors || [];
@@ -59,13 +49,22 @@ export async function runOverpassQuery(query, timeoutMs = 15000) {
   }
 }
 
-export async function fetchRoadNetwork(bbox, majorRoadsOnly = false) {
+// overpassTimeoutSec / axiosTimeoutMs are configurable so the one-time bulk
+// pre-fetch (run locally, not under demo time-pressure) can give large
+// metro-area queries much longer to finish than a live user-facing request
+// should ever be allowed to wait.
+export async function fetchRoadNetwork(
+  bbox,
+  majorRoadsOnly = false,
+  overpassTimeoutSec = 25,
+  axiosTimeoutMs = 25000
+) {
   const roadFilter = majorRoadsOnly
     ? '["highway"~"^(motorway|trunk|primary|secondary|tertiary|residential|unclassified|service|living_street)$"]'
     : '["highway"]';
 
   const query = `
-    [out:json][timeout:15];
+    [out:json][timeout:${overpassTimeoutSec}];
     (
       way${roadFilter}(${bbox.join(",")});
     );
@@ -74,7 +73,7 @@ export async function fetchRoadNetwork(bbox, majorRoadsOnly = false) {
     out skel qt;
   `;
 
-  return runOverpassQuery(query, 25000);
+  return runOverpassQuery(query, axiosTimeoutMs);
 }
 
 function estimateSpeedKmph(tags) {
@@ -140,9 +139,6 @@ export function buildGraph(osmData) {
   return { graph, nodes };
 }
 
-// Highest speed implied by any edge currently in the graph. Used as the A*
-// heuristic speed so the heuristic never overestimates travel time
-// (keeps A* admissible/optimal regardless of what roads happen to be in range).
 export function getMaxRoadSpeedKmph(graph, fallback = 120) {
   let max = 0;
 
